@@ -36,16 +36,36 @@
     arVoice = vs.find(v => /ar[-_]SA/i.test(v.lang)) || vs.find(v => /^ar/i.test(v.lang)) || null;
   }
   if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
-  function speak(text) {
-    if (!('speechSynthesis' in window)) { alertMsg('এই ব্রাউজারে শোনার সুবিধা নেই।'); return; }
-    speechSynthesis.cancel();
+  function tts(text, onend) {
+    if (!('speechSynthesis' in window)) { alertMsg('এই ব্রাউজারে শোনার সুবিধা নেই।'); if (onend) onend(); return; }
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'ar-SA'; u.rate = 0.85;
     if (arVoice) u.voice = arVoice;
+    if (onend) u.onend = onend;
     speechSynthesis.speak(u);
   }
+  // Recorded audio first (audio/<key>.mp3); if missing, fall back to the browser voice.
+  let current = null;
+  function stopAll() { if (current) { current.pause(); current = null; } if ('speechSynthesis' in window) speechSynthesis.cancel(); }
+  function play(text, key, onend) {
+    if (!key) { tts(text, onend); return; }
+    const a = new Audio(`audio/${key}.mp3`);
+    current = a;
+    let fell = false;
+    const fallback = () => { if (fell) return; fell = true; tts(text, onend); };
+    a.onerror = fallback;
+    a.onended = () => { if (onend) onend(); };
+    a.play().catch(fallback);
+  }
+  function speak(text, key) { stopAll(); play(text, key); }
+  function speakSeq(items) {
+    stopAll(); let i = 0;
+    const next = () => { if (i >= items.length) return; const it = items[i++]; play(it.text, it.key, next); };
+    next();
+  }
   function alertMsg(m) { const d = document.createElement('div'); d.textContent = m; d.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#10232b;color:#fff;padding:10px 16px;border-radius:10px;z-index:99'; document.body.appendChild(d); setTimeout(() => d.remove(), 2600); }
-  const spk = t => t ? `<button class="speak" data-say="${esc(t)}" title="শুনুন" aria-label="শুনুন">🔊</button>` : '';
+  const spk = (t, key) => t ? `<button class="speak" data-say="${esc(t)}" data-key="${esc(key || '')}" title="শুনুন" aria-label="শুনুন">🔊</button>` : '';
+  const k2 = n => String(n).padStart(2, '0');
 
   // ---------- data ----------
   async function getManifest() {
@@ -181,31 +201,31 @@
       html += sec('dialogue', '💬', 'কথোপকথন', `
         ${L.dialogue.setting ? `<p class="dlg-setting">${mixed(L.dialogue.setting)}</p>` : ''}
         <div class="btns" style="margin:0 0 12px"><button class="btn btn-ghost" data-sayall="1">🔊 পুরো কথোপকথন শুনুন</button></div>
-        <div class="dlg">${L.dialogue.lines.map(x => `<div class="bubble"><span class="who">${esc(x.speaker)}</span><div class="say">
-          <span class="ar">${esc(x.najdi)}${spk(x.najdi)}</span>
+        <div class="dlg">${L.dialogue.lines.map((x, xi) => `<div class="bubble"><span class="who">${esc(x.speaker)}</span><div class="say">
+          <span class="ar">${esc(x.najdi)}${spk(x.najdi, `${L.id}-d${k2(xi + 1)}`)}</span>
           ${x.najdi_bn ? `<div class="tr">${esc(x.najdi_bn)}</div>` : ''}
           ${x.fusha && x.fusha !== x.najdi ? `<div class="fu"><span class="lbl f">ফুসহা</span><span class="ar">${esc(x.fusha)}</span></div>` : ''}
           ${x.meaning ? `<div class="mn">${mixed(x.meaning)}</div>` : ''}
         </div></div>`).join('')}</div>`);
     }
     if (L.vocab && L.vocab.length) {
-      html += sec('vocab', '🧩', 'নতুন শব্দ', `<div class="vocab">${L.vocab.map(v => `<div class="vcard">
-        <span class="ar">${esc(v.najdi || v.fusha)}</span>${spk(v.najdi || v.fusha)}
+      html += sec('vocab', '🧩', 'নতুন শব্দ', `<div class="vocab">${L.vocab.map((v, vi) => `<div class="vcard">
+        <span class="ar">${esc(v.najdi || v.fusha)}</span>${spk(v.najdi || v.fusha, `${L.id}-v${k2(vi + 1)}`)}
         ${v.najdi_bn ? `<div class="tr">${esc(v.najdi_bn)}</div>` : ''}
         <div class="mn">${mixed(v.meaning)}</div>
         ${v.fusha && v.najdi && v.fusha !== v.najdi ? `<div class="fu">ফুসহা: <span class="ar">${esc(v.fusha)}</span>${v.fusha_bn ? ` · ${esc(v.fusha_bn)}` : ''}</div>` : ''}
       </div>`).join('')}</div>`);
     }
     if (L.phrases && L.phrases.length) {
-      html += sec('phrases', '🗣️', 'কাজের বাক্যাংশ', L.phrases.map(p => `<div class="phrase">
-        <div><span class="ar">${esc(p.najdi || p.fusha)}</span>${spk(p.najdi || p.fusha)}
+      html += sec('phrases', '🗣️', 'কাজের বাক্যাংশ', L.phrases.map((p, pi) => `<div class="phrase">
+        <div><span class="ar">${esc(p.najdi || p.fusha)}</span>${spk(p.najdi || p.fusha, `${L.id}-p${k2(pi + 1)}`)}
         ${p.najdi_bn ? `<div class="tr">${esc(p.najdi_bn)}</div>` : ''}<div class="mn">${mixed(p.meaning)}</div>
         ${p.fusha && p.najdi && p.fusha !== p.najdi ? `<div class="fu"><span class="lbl f">ফুসহা</span><span class="ar" style="font-size:1.1em">${esc(p.fusha)}</span></div>` : ''}</div>
         ${p.use ? `<div class="use">কখন: ${mixed(p.use)}</div>` : ''}</div>`).join(''));
     }
     if (L.culture) html += sec('culture', '🌴', 'সৌদি সংস্কৃতি টিপস', `<p style="margin:0">${mixed(L.culture)}</p>`, 'culture');
     if (L.practice && L.practice.length) {
-      html += sec('practice', '🎯', 'অনুশীলন', L.practice.map(t => `<div class="task"><span class="ty">${esc(t.type || 'কাজ')}</span><div>${mixed(t.task)}${t.model ? `<div class="model"><span class="ar">${esc(t.model)}</span>${spk(t.model)}</div>` : ''}</div></div>`).join(''));
+      html += sec('practice', '🎯', 'অনুশীলন', L.practice.map((t, ti) => `<div class="task"><span class="ty">${esc(t.type || 'কাজ')}</span><div>${mixed(t.task)}${t.model ? `<div class="model"><span class="ar">${esc(t.model)}</span>${spk(t.model, `${L.id}-x${k2(ti + 1)}`)}</div>` : ''}</div></div>`).join(''));
     }
     if (L.quiz && L.quiz.length) {
       html += sec('quiz', '✅', 'কুইজ', `<div id="quiz">${L.quiz.map((q, qi) => `<div class="q" data-a="${q.answer}"><p>${bnDigits(qi + 1)}. ${mixed(q.q)}</p>
@@ -260,7 +280,7 @@
     });
     document.getElementById('mark').addEventListener('click', () => { markDone(L.id, !isDone); lesson(file, id); });
     const sayAll = app.querySelector('[data-sayall]');
-    if (sayAll) sayAll.addEventListener('click', () => speak(L.dialogue.lines.map(x => x.najdi).join(' ... ')));
+    if (sayAll) sayAll.addEventListener('click', () => speakSeq(L.dialogue.lines.map((x, xi) => ({ text: x.najdi, key: `${L.id}-d${k2(xi + 1)}` }))));
   }
 
   function guide() {
@@ -315,7 +335,7 @@
 
   // delegated clicks
   document.addEventListener('click', e => {
-    const s = e.target.closest('[data-say]'); if (s) { speak(s.dataset.say); return; }
+    const s = e.target.closest('[data-say]'); if (s) { speak(s.dataset.say, s.dataset.key); return; }
     const j = e.target.closest('[data-jump]'); if (j) { const el = document.getElementById(j.dataset.jump); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
   });
   document.addEventListener('change', e => {
